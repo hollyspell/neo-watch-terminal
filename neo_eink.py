@@ -11,7 +11,7 @@ Preview mode (no Pi hardware):
 
 Hardware mode (Raspberry Pi + Waveshare 7.5" v2):
     python neo_eink.py
-    (button on GPIO 17 toggles views)
+    (button on GPIO 26 toggles views)
 
 NASA API key: uses DEMO_KEY by default (30 req/hr).
 Set NASA_API_KEY env var for a free personal key (1000 req/day).
@@ -486,7 +486,7 @@ def run_hardware_loop():
         print("RPi.GPIO not available. Use --preview for desktop testing.")
         return
 
-    BUTTON_PIN = 17
+    BUTTON_PIN = 26
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
