@@ -107,7 +107,7 @@ def fetch_sentry():
     items = []
     for obj in data.get("data", []):
         ps = float(obj.get("ps_cum", -99))
-        ts = int(float(obj.get("ts_max", 0)))
+        ts = int(float(obj.get("ts_max") or 0))
         dia = obj.get("diameter", "?")
         ip = obj.get("ip", "?")
         name = obj.get("fullname", obj.get("des", "?")).strip()
