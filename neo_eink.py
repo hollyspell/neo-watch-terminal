@@ -373,61 +373,20 @@ def render_sentry(items):
 
     # ── Header ──
     max_torino = 0
-    if items:
-        max_torino = max(it["torino"] for it in items)
-    draw.text((20, 12), "SENTRY", font=F32, fill=BLACK)
-    torino_str = f"Jun {datetime.utcnow().year} · all Torino {max_torino}"
-    bbox = draw.textbbox((0, 0), torino_str, font=F18)
-    draw.text((W - 20 - (bbox[2]-bbox[0]), 18), torino_str, font=F18, fill=BLACK)
-    draw.line([(20, 50), (W-20, 50)], fill=BLACK, width=3)
+    def fmt_ip(ip_raw):
+    """Impact probability -> compact scientific notation, e.g. 5.7e-04."""
+    try:
+        return f"{float(ip_raw):.1e}"
+    except (TypeError, ValueError):
+        return "?"
 
-    # ── Left panel: ranked objects ──
-    mid_x = 450  # divider x — give right panel more room
-    draw.text((20, 58), "Highest-rated objects", font=F20B, fill=BLACK)
-    draw.text((20, 78), "Ranked by Palermo scale", font=F14, fill=GRAY)
-
-    # Zero line for bars — placed right of object names
-    zero_x = mid_x - 60
-    bar_top = 100
-    bar_spacing = 54
-
-    # Vertical zero reference line
-    n_show = min(5, len(items) if items else 0)
-    if n_show > 0:
-        draw.line([(zero_x, bar_top - 4), (zero_x, bar_top + n_show * bar_spacing - 16)],
-                  fill=BLACK, width=2)
-        draw.text((zero_x + 4, bar_top - 16), "0", font=F14, fill=GRAY)
-
-    top_items = items[:n_show] if items else []
-    for i, it in enumerate(top_items):
-        y = bar_top + i * bar_spacing
-        # Name
-        draw.text((20, y), it["name"], font=F20B, fill=BLACK)
-        # Details line
-        dia_str = it["diameter_km"]
-        if isinstance(dia_str, str):
-            detail = f"{dia_str} km"
-        else:
-            detail = f"{float(dia_str):.2f} km"
-        ip_str = it["impact_prob"]
-        yr_str = it["year_range"]
-        detail += f" · {ip_str} · {yr_str}"
-        draw.text((20, y + 18), detail, font=F14, fill=GRAY)
-
-        # Palermo bar — grows LEFT from zero_x
-        ps = it["palermo"]
-        bar_len = max(4, int((ps + 8) / 8 * 180))
-        bar_left = zero_x - bar_len
-        fill_c = BLACK if ps > -2 else GRAY
-        draw.rectangle([bar_left, y + 4, zero_x, y + 14], fill=fill_c)
-        # Value label to the left of the bar
-        ps_str = f"{ps:.2f}"
-        bbox = draw.textbbox((0, 0), ps_str, font=F14)
-        draw.text((bar_left - (bbox[2]-bbox[0]) - 5, y + 1), ps_str, font=F14, fill=BLACK)
-
-    if not items:
-        draw.text((20, 110), "No data — check API", font=F20, fill=BLACK)
-
+def fmt_years(yr):
+    """Collapse degenerate ranges: '2880-2880' -> '2880'."""
+    if isinstance(yr, str) and "-" in yr:
+        a, b = yr.split("-", 1)
+        if a.strip() == b.strip():
+            return a.strip()
+    return yr
     # ── Vertical divider ──
     draw.line([(mid_x, 56), (mid_x, 368)], fill=180, width=1)
 
