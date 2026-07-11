@@ -49,7 +49,7 @@ F36 = font(32, bold=True)
 
 BLACK = 0
 WHITE = 255
-GRAY = 120  # dark enough to survive 1-bit dither as readable stipple
+GRAY = 75  # dark enough to survive 1-bit dither as readable stipple
 
 # ─── API fetching ─────────────────────────────────────────────────────
 
