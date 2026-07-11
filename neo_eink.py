@@ -367,18 +367,13 @@ def _compute_stats(objects):
 
 # ─── View 2: SENTRY ──────────────────────────────────────────────────
 
-def render_sentry(items):
-    img = Image.new("L", (W, H), WHITE)
-    draw = ImageDraw.Draw(img)
-
-    # ── Header ──
-    max_torino = 0
-    def fmt_ip(ip_raw):
+def fmt_ip(ip_raw):
     """Impact probability -> compact scientific notation, e.g. 5.7e-04."""
     try:
         return f"{float(ip_raw):.1e}"
     except (TypeError, ValueError):
         return "?"
+
 
 def fmt_years(yr):
     """Collapse degenerate ranges: '2880-2880' -> '2880'."""
@@ -387,6 +382,73 @@ def fmt_years(yr):
         if a.strip() == b.strip():
             return a.strip()
     return yr
+
+
+def render_sentry(items):
+    img = Image.new("L", (W, H), WHITE)
+    draw = ImageDraw.Draw(img)
+
+    max_torino = 0
+    if items:
+        max_torino = max(it["torino"] for it in items)
+    draw.text((20, 12), "SENTRY", font=F32, fill=BLACK)
+    torino_str = datetime.utcnow().strftime("%b %Y") + f" · all Torino {max_torino}"
+    bbox = draw.textbbox((0, 0), torino_str, font=F18)
+    draw.text((W - 20 - (bbox[2]-bbox[0]), 18), torino_str, font=F18, fill=BLACK)
+    draw.line([(20, 50), (W-20, 50)], fill=BLACK, width=3)
+
+    # ── Left panel: ranked objects ──
+    mid_x = 450
+    draw.text((20, 58), "Highest-rated objects", font=F20B, fill=BLACK)
+    draw.text((20, 78), "Ranked by Palermo scale", font=F14, fill=BLACK)
+
+    # Bar lane: names own [20, name_right]; bars own their own lane after it
+    name_right = 250
+    bar_lane_left = name_right + 60   # room for value labels left of short bars
+    zero_x = mid_x - 20
+    bar_max = zero_x - bar_lane_left
+    bar_top = 100
+    bar_spacing = 54
+
+    n_show = min(5, len(items) if items else 0)
+    if n_show > 0:
+        draw.line([(zero_x, bar_top - 4), (zero_x, bar_top + n_show * bar_spacing - 16)],
+                  fill=BLACK, width=2)
+        draw.text((zero_x + 4, bar_top - 16), "0", font=F14, fill=BLACK)
+
+    top_items = items[:n_show] if items else []
+    for i, it in enumerate(top_items):
+        y = bar_top + i * bar_spacing
+        # Name — shrink to fit its column, truncate only as last resort
+        name = it["name"]
+        f_name = F20B
+        if draw.textbbox((0, 0), name, font=f_name)[2] > name_right - 20:
+            f_name = F16
+            while name and draw.textbbox((0, 0), name, font=f_name)[2] > name_right - 20:
+                name = name[:-1]
+        draw.text((20, y), name, font=f_name, fill=BLACK)
+        # Details line
+        dia_str = it["diameter_km"]
+        if isinstance(dia_str, str):
+            detail = f"{dia_str} km"
+        else:
+            detail = f"{float(dia_str):.2f} km"
+        detail += f" · {fmt_ip(it['impact_prob'])} · {fmt_years(it['year_range'])}"
+        draw.text((20, y + 18), detail, font=F14, fill=BLACK)
+
+        # Palermo bar — grows LEFT from zero_x, clamped to its lane
+        ps = it["palermo"]
+        bar_len = max(4, min(bar_max, int((ps + 8) / 8 * bar_max)))
+        bar_left = zero_x - bar_len
+        fill_c = BLACK if ps > -2 else GRAY
+        draw.rectangle([bar_left, y + 4, zero_x, y + 14], fill=fill_c)
+        ps_str = f"{ps:.2f}"
+        bbox = draw.textbbox((0, 0), ps_str, font=F14)
+        draw.text((bar_left - (bbox[2]-bbox[0]) - 5, y + 1), ps_str, font=F14, fill=BLACK)
+
+    if not items:
+        draw.text((20, 110), "No data — check API", font=F20, fill=BLACK)
+
     # ── Vertical divider ──
     draw.line([(mid_x, 56), (mid_x, 368)], fill=180, width=1)
 
