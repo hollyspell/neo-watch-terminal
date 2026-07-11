@@ -49,7 +49,7 @@ F36 = font(32, bold=True)
 
 BLACK = 0
 WHITE = 255
-GRAY = 75  # dark enough to survive 1-bit dither as readable stipple
+GRAY = 30  # dark enough to survive 1-bit dither as readable stipple
 
 # ─── API fetching ─────────────────────────────────────────────────────
 
@@ -161,11 +161,45 @@ def paste_earth(target_img, cx, cy, diameter):
 
 def paste_moon(target_img, cx, cy, diameter):
     """Paste the ink-illustration Moon onto a grayscale image."""
-    bmp = _load_bitmap(MOON_BMP, diameter)
+    bmp = apply_moon_phase(_load_bitmap(MOON_BMP, diameter), moon_phase_fraction())
     x = cx - diameter // 2
     y = cy - diameter // 2
     target_img.paste(bmp, (x, y))
+# ─── Moon phase (pure math, no API) ──────────────────────────────────
 
+SYNODIC = 29.530588853  # mean synodic month, days
+MOON_EPOCH = datetime(2000, 1, 6, 18, 14)  # reference new moon, UTC
+
+def moon_phase_fraction(dt=None):
+    """0.0 = new, 0.25 = first quarter, 0.5 = full, 0.75 = last quarter."""
+    if dt is None:
+        dt = datetime.utcnow()
+    days = (dt - MOON_EPOCH).total_seconds() / 86400.0
+    return (days % SYNODIC) / SYNODIC
+
+def apply_moon_phase(moon_img, fraction):
+    """Whiten the unlit portion of the circular moon bitmap."""
+    img = moon_img.copy()
+    d = ImageDraw.Draw(img)
+    size = img.width
+    r = size / 2.0
+    c = math.cos(2 * math.pi * fraction)
+    waxing = fraction < 0.5
+    for py in range(size):
+        y = py - r + 0.5
+        if abs(y) >= r:
+            continue
+        x_e = math.sqrt(r * r - y * y)
+        if waxing:
+            lit_lo, lit_hi = c * x_e, x_e      # lit on the right
+        else:
+            lit_lo, lit_hi = -x_e, -c * x_e    # lit on the left
+        if lit_lo > -x_e:
+            d.line([(r - x_e, py), (r + lit_lo, py)], fill=WHITE)
+        if lit_hi < x_e:
+            d.line([(r + lit_hi, py), (r + x_e, py)], fill=WHITE)
+    d.ellipse([0, 0, size - 1, size - 1], outline=BLACK, width=1)
+    return img
 
 def ld_to_y(ld, y_top, y_bottom):
     """Map lunar distance (log scale) to y pixel. ld in [0.3, 35] → [y_bottom, y_top]."""
