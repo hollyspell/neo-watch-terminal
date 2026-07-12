@@ -545,9 +545,6 @@ def run_hardware_loop():
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-    print("Fetching data...")
-    neo_objs, d_start, d_end = fetch_neows()
-    sentry_items = fetch_sentry()
 
     img_neo = to_1bit(render_neo_watch(neo_objs, d_start, d_end))
     img_sentry = to_1bit(render_sentry(sentry_items))
@@ -631,7 +628,7 @@ def main():
         combo.save(out / "preview_combo.png")
         print("Saved: preview_combo.png")
     else:
-        run_hardware_loop()
+        run_hardware_loop(neo_objs, d_start, d_end, sentry_items)
 
 
 def _render_combo(img1, img2):
