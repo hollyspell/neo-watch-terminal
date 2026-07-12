@@ -11,20 +11,26 @@ A 3D-printed terminal with a 7.5" e-ink display, powered by a Raspberry Pi Zero,
 - **NEO WATCH** — this week's asteroid close approaches plotted by distance and day
 - **SENTRY** — JPL's impact risk watch list with Palermo and Torino scale ratings
 
-No soldering required.
+Minimal soldering — four small wire-to-wire joints on the button leads.
+Everything else is push-on.
 
 ## Quick start
 
 ```bash
-# On your Pi (after flashing Raspberry Pi OS Lite and enabling SPI):
-sudo apt install -y python3-pip python3-pil python3-numpy python3-requests git
-pip3 install RPi.GPIO spidev --break-system-packages
+# On your Pi (after flashing Raspberry Pi OS Lite 32-bit and enabling SPI):
+sudo apt install -y git python3-pip python3-pil python3-numpy \
+                    python3-rpi.gpio python3-spidev python3-requests \
+                    python3-lgpio fonts-dejavu-core
 
 git clone https://github.com/waveshare/e-Paper.git
 cd e-Paper/RaspberryPi_JetsonNano/python && pip3 install . --break-system-packages && cd ~
 
-git clone https://github.com/YOURUSERNAME/neo-watch-terminal.git
+git clone https://github.com/hollyspell/neo-watch-terminal.git
 cd neo-watch-terminal
+
+# Get a free key at https://api.nasa.gov — DEMO_KEY is only 30/hr and 50/day
+export NASA_API_KEY="your_key_here"
+
 python3 neo_eink.py
 ```
 
@@ -58,6 +64,17 @@ See the [wiki](../../wiki) for the full build guide:
 | `terminal.py` | Parametric enclosure generator (Manifold3D + trimesh) |
 | `eink_terminal.stl` | Printable enclosure body |
 | `eink_plate.stl` | Printable slide-in bottom panel |
+
+
+## Before you build
+
+Two things that will save you a day:
+
+- **The HAT's Display Config switch must be on `B`** (Interface Config `0`).
+  Set wrong, the display runs every demo with zero errors and shows nothing at all.
+- **The button goes on GPIO 26, not GPIO 17.** GPIO 17 is the display's reset line.
+
+See [Troubleshooting](../../wiki/Troubleshooting) if the panel stays blank.
 
 ## Data sources
 
