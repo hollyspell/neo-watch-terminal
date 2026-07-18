@@ -31,6 +31,7 @@ from PIL import Image, ImageDraw, ImageFont
 W, H = 800, 480  # Waveshare 7.5" v2 resolution
 NASA_KEY = os.environ.get("NASA_API_KEY", "DEMO_KEY")
 NEOWS_URL = "https://api.nasa.gov/neo/rest/v1/feed"
+_neows_quota = None  # X-RateLimit-Remaining from the most recent NeoWs call
 SENTRY_URL = "https://ssd-api.jpl.nasa.gov/sentry.api"
 
 FONT_REG = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
@@ -68,10 +69,14 @@ def fetch_neows():
         "end_date": end.isoformat(),
         "api_key": NASA_KEY,
     }
+    global _neows_quota
     try:
         r = requests.get(NEOWS_URL, params=params, timeout=30)
         r.raise_for_status()
         data = r.json()
+        _neows_quota = r.headers.get("X-RateLimit-Remaining")
+        if _neows_quota:
+            print(f"  NeoWs quota remaining: {_neows_quota}")
     except Exception as e:
         print(f"NeoWs fetch failed: {e}")
         return None, today, end
@@ -175,16 +180,37 @@ def paste_moon(target_img, cx, cy, diameter):
 
 # ─── Moon phase (pure math, no API) ──────────────────────────────────
 
-SYNODIC = 29.530588853  # mean synodic month, days
-MOON_EPOCH = datetime(2000, 1, 6, 18, 14)  # reference new moon, UTC
+def _julian_day(dt):
+    y, m = dt.year, dt.month
+    d = dt.day + (dt.hour + dt.minute/60 + dt.second/3600)/24
+    if m <= 2:
+        y -= 1; m += 12
+    a = y // 100
+    b = 2 - a + a//4
+    return int(365.25*(y+4716)) + int(30.6001*(m+1)) + d + b - 1524.5
+
 
 def moon_phase_fraction(dt=None):
-    """0.0 = new, 0.25 = first quarter, 0.5 = full, 0.75 = last quarter."""
+    """0.0 = new, 0.25 = first quarter, 0.5 = full, 0.75 = last quarter.
+
+    Meeus (Astronomical Algorithms ch.48) low-precision phase angle — accounts
+    for the Moon's elliptical orbit, unlike a mean-synodic approximation.
+    Accurate to well under 1% illumination. No network required.
+    """
     if dt is None:
         dt = datetime.utcnow()
-    days = (dt - MOON_EPOCH).total_seconds() / 86400.0
-    return (days % SYNODIC) / SYNODIC
-
+    T = (_julian_day(dt) - 2451545.0) / 36525.0
+    D_deg = (297.8501921 + 445267.1114034*T - 0.0018819*T*T) % 360
+    M  = math.radians((357.5291092 + 35999.0502909*T - 0.0001536*T*T) % 360)
+    Mp = math.radians((134.9633964 + 477198.8675055*T + 0.0087414*T*T) % 360)
+    D  = math.radians(D_deg)
+    i = (180 - D_deg
+         - 6.289*math.sin(Mp) + 2.100*math.sin(M)
+         - 1.274*math.sin(2*D - Mp) - 0.658*math.sin(2*D)
+         - 0.214*math.sin(2*Mp) - 0.110*math.sin(D)) % 360
+    k = (1 + math.cos(math.radians(i))) / 2          # illuminated fraction
+    a = math.acos(max(-1.0, min(1.0, 1 - 2*k))) / (2*math.pi)
+    return a if D_deg < 180 else 1 - a                # D<180 = waxing
 
 def apply_moon_phase(moon_img, fraction):
     """Shade the moon bitmap by phase.
@@ -364,8 +390,10 @@ def render_neo_watch(objects, date_start, date_end):
         draw.text((bx + 14 + (vbbox[2]-vbbox[0]), box_y + 24), sub, font=F14, fill=GRAY)
 
     # ── Footer ──
-    draw.text((20, H - 22), "NASA NeoWs · refreshed " + datetime.utcnow().strftime("%H:%M UTC"),
-              font=F14, fill=GRAY)
+    footer = "NASA NeoWs · refreshed " + time.strftime("%H:%M %Z")
+    if _neows_quota:
+        footer += f" · {_neows_quota} API calls left today"
+    draw.text((20, H - 22), footer, font=F14, fill=GRAY)
 
     return img
 
@@ -413,7 +441,7 @@ def render_sentry(items):
     if items:
         max_torino = max(it["torino"] for it in items)
     draw.text((20, 12), "SENTRY", font=F32, fill=BLACK)
-    torino_str = datetime.utcnow().strftime("%b %Y") + f" · all Torino {max_torino}"
+    torino_str = time.strftime("%b %Y") + f" · all Torino {max_torino}"
     bbox = draw.textbbox((0, 0), torino_str, font=F18)
     draw.text((W - 20 - (bbox[2]-bbox[0]), 18), torino_str, font=F18, fill=BLACK)
     draw.line([(20, 50), (W-20, 50)], fill=BLACK, width=3)
@@ -522,7 +550,7 @@ def render_sentry(items):
 
     # Footer
     draw.text((20, H - 20),
-              "JPL Sentry · checked " + datetime.utcnow().strftime("%d %b %Y"),
+              "JPL Sentry · checked " + time.strftime("%d %b %Y"),
               font=F14, fill=BLACK)
 
     return img
