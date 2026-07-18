@@ -212,17 +212,43 @@ def moon_phase_fraction(dt=None):
     a = math.acos(max(-1.0, min(1.0, 1 - 2*k))) / (2*math.pi)
     return a if D_deg < 180 else 1 - a                # D<180 = waxing
 
+_lit_cache = {}
+
+def _lit_version(moon_img):
+    """Sunlit rendering of the moon: craters kept, disk background lifted to white."""
+    key = (moon_img.width, moon_img.tobytes())
+    if key in _lit_cache:
+        return _lit_cache[key]
+    size = moon_img.width
+    r = size / 2.0
+    px = moon_img.load()
+    vals = [px[x, y]
+            for y in range(size) for x in range(size)
+            if (x - r + 0.5)**2 + (y - r + 0.5)**2 < (r - 1)**2]
+    if not vals:
+        return moon_img
+    vals.sort()
+    base = vals[len(vals)//2]            # median ≈ the disk's background tone
+    T = max(1, int(base * 0.98))
+    out = moon_img.point(lambda v: 255 if v >= T else v)
+    _lit_cache[key] = out
+    return out
+
+
 def apply_moon_phase(moon_img, fraction):
     """Shade the moon bitmap by phase.
 
-    Convention: the SUNLIT portion is rendered WHITE (blank), and the shadowed
-    portion keeps the illustration's stipple. So a new moon is fully stippled
-    and a full moon is an empty outlined circle.
+    Sunlit side  → craters on white (the disk's grey background lifted out).
+    Shadowed side → the illustration as-is, grey fill and all.
+    So a new moon is fully shaded and a full moon is craters on blank white.
     """
-    img = moon_img.copy()
-    d = ImageDraw.Draw(img)
-    size = img.width
+    size = moon_img.width
     r = size / 2.0
+    shadow = moon_img
+    lit = _lit_version(moon_img)
+
+    mask = Image.new("L", (size, size), 0)
+    md = ImageDraw.Draw(mask)
     c = math.cos(2 * math.pi * fraction)
     waxing = fraction < 0.5
     for py in range(size):
@@ -235,11 +261,11 @@ def apply_moon_phase(moon_img, fraction):
         else:
             lit_lo, lit_hi = -x_e, -c * x_e    # lit on the left
         if lit_hi > lit_lo:
-            d.line([(r + lit_lo, py), (r + lit_hi, py)], fill=WHITE)
-    # Thin outline so the disk still reads as a disk at any phase
-    d.ellipse([0, 0, size - 1, size - 1], outline=BLACK, width=1)
-    return img
+            md.line([(r + lit_lo, py), (r + lit_hi, py)], fill=255)
 
+    out = Image.composite(lit, shadow, mask)
+    ImageDraw.Draw(out).ellipse([0, 0, size - 1, size - 1], outline=BLACK, width=1)
+    return out
 
 def ld_to_y(ld, y_top, y_bottom):
     """Map lunar distance (log scale) to y pixel. ld in [0.3, 35] → [y_bottom, y_top]."""
