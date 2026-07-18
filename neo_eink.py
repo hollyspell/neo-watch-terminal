@@ -13,8 +13,10 @@ Hardware mode (Raspberry Pi + Waveshare 7.5" v2):
     python neo_eink.py
     (button on GPIO 26 toggles views)
 
-NASA API key: uses DEMO_KEY by default (30 req/hr).
+NASA API key: uses DEMO_KEY by default (30 req/hr AND 50 req/day).
 Set NASA_API_KEY env var for a free personal key (1000 req/day).
+Note: systemd does not read ~/.bashrc — the service unit needs its own
+Environment=NASA_API_KEY=... line.
 """
 
 import json, math, os, sys, time, argparse
@@ -54,7 +56,11 @@ GRAY = 30  # dark enough to survive 1-bit dither as readable stipple
 # ─── API fetching ─────────────────────────────────────────────────────
 
 def fetch_neows():
-    """Fetch this week's near-Earth object close approaches."""
+    """Fetch this week's near-Earth object close approaches.
+
+    Returns (objects, start, end). `objects` is None on a real failure, or a
+    list (possibly empty) on success — the two states render differently.
+    """
     today = datetime.utcnow().date()
     end = today + timedelta(days=6)
     params = {
@@ -106,7 +112,7 @@ def fetch_sentry():
 
     items = []
     for obj in data.get("data", []):
-        ps = float(obj.get("ps_cum", -99))
+        ps = float(obj.get("ps_cum") or -99)
         ts = int(float(obj.get("ts_max") or 0))
         dia = obj.get("diameter", "?")
         ip = obj.get("ip", "?")
@@ -160,11 +166,13 @@ def paste_earth(target_img, cx, cy, diameter):
 
 
 def paste_moon(target_img, cx, cy, diameter):
-    """Paste the ink-illustration Moon onto a grayscale image."""
+    """Paste the ink-illustration Moon, phase-shaded, onto a grayscale image."""
     bmp = apply_moon_phase(_load_bitmap(MOON_BMP, diameter), moon_phase_fraction())
     x = cx - diameter // 2
     y = cy - diameter // 2
     target_img.paste(bmp, (x, y))
+
+
 # ─── Moon phase (pure math, no API) ──────────────────────────────────
 
 SYNODIC = 29.530588853  # mean synodic month, days
@@ -177,8 +185,14 @@ def moon_phase_fraction(dt=None):
     days = (dt - MOON_EPOCH).total_seconds() / 86400.0
     return (days % SYNODIC) / SYNODIC
 
+
 def apply_moon_phase(moon_img, fraction):
-    """Whiten the unlit portion of the circular moon bitmap."""
+    """Shade the moon bitmap by phase.
+
+    Convention: the SUNLIT portion is rendered WHITE (blank), and the shadowed
+    portion keeps the illustration's stipple. So a new moon is fully stippled
+    and a full moon is an empty outlined circle.
+    """
     img = moon_img.copy()
     d = ImageDraw.Draw(img)
     size = img.width
@@ -194,12 +208,12 @@ def apply_moon_phase(moon_img, fraction):
             lit_lo, lit_hi = c * x_e, x_e      # lit on the right
         else:
             lit_lo, lit_hi = -x_e, -c * x_e    # lit on the left
-        if lit_lo > -x_e:
-            d.line([(r - x_e, py), (r + lit_lo, py)], fill=WHITE)
-        if lit_hi < x_e:
-            d.line([(r + lit_hi, py), (r + x_e, py)], fill=WHITE)
+        if lit_hi > lit_lo:
+            d.line([(r + lit_lo, py), (r + lit_hi, py)], fill=WHITE)
+    # Thin outline so the disk still reads as a disk at any phase
     d.ellipse([0, 0, size - 1, size - 1], outline=BLACK, width=1)
     return img
+
 
 def ld_to_y(ld, y_top, y_bottom):
     """Map lunar distance (log scale) to y pixel. ld in [0.3, 35] → [y_bottom, y_top]."""
@@ -325,7 +339,14 @@ def render_neo_watch(objects, date_start, date_end):
                     if sz_y < chart_bot - 2:
                         draw.text((ox - sw//2, sz_y), size_str, font=F14, fill=GRAY)
     else:
-        draw.text((W//2 - 80, 200), "No data — check API", font=F20, fill=BLACK)
+        # Distinguish "the sky was quiet" from "the fetch actually failed".
+        # fetch_neows() returns None on failure, [] on a successful quiet week.
+        if objects is None:
+            msg = "No data — check API"
+        else:
+            msg = "No close approaches this week"
+        bbox = draw.textbbox((0, 0), msg, font=F20)
+        draw.text(((W - (bbox[2]-bbox[0])) // 2, 200), msg, font=F20, fill=BLACK)
 
     # ── Stat boxes ──
     box_y = chart_bot + 40
@@ -474,11 +495,9 @@ def render_sentry(items):
     ]
     for j, line in enumerate(palermo_lines):
         y = 82 + j * 17
-        f = F14 if not line.startswith((" ", "−", "+")) else F14
-        c = BLACK if line.startswith((" ", "−", "+")) else GRAY
         if line == "":
             continue
-        draw.text((rx, y), line, font=F14, fill=c)
+        draw.text((rx, y), line, font=F14, fill=BLACK)
 
     # ── Torino section ──
     draw.line([(20, 376), (W-20, 376)], fill=BLACK, width=2)
@@ -489,7 +508,7 @@ def render_sentry(items):
         "survive atmosphere. No object has ever exceeded Torino 1.",
     ]
     for j, line in enumerate(torino_lines):
-        draw.text((20, 406 + j * 16), line, font=F14, fill=GRAY)
+        draw.text((20, 406 + j * 16), line, font=F14, fill=BLACK)
 
     # Big Torino number
     draw.text((rx, 384), str(max_torino), font=F36, fill=BLACK)
@@ -499,12 +518,12 @@ def render_sentry(items):
         "The sky is quiet.",
     ]
     for j, line in enumerate(t_lines):
-        draw.text((rx + 40, 388 + j * 16), line, font=F14, fill=GRAY)
+        draw.text((rx + 40, 388 + j * 16), line, font=F14, fill=BLACK)
 
     # Footer
     draw.text((20, H - 20),
               "JPL Sentry · checked " + datetime.utcnow().strftime("%d %b %Y"),
-              font=F14, fill=GRAY)
+              font=F14, fill=BLACK)
 
     return img
 
@@ -519,22 +538,37 @@ def to_1bit(img):
 # ─── Hardware driver (Waveshare 7.5" v2) ─────────────────────────────
 
 def push_to_display(img_1bit):
-    """Push a 1-bit PIL image to the Waveshare 7.5" v2 e-ink display."""
+    """Push a 1-bit PIL image to the Waveshare 7.5" v2 e-ink display.
+
+    The panel must never be left awake in its high-voltage state, so the
+    sleep() is in a finally block — it runs even if the refresh throws.
+    """
     try:
         from waveshare_epd import epd7in5_V2
-        epd = epd7in5_V2.EPD()
+    except ImportError:
+        print("waveshare_epd not found — run on a Pi with the driver installed.")
+        return
+
+    epd = epd7in5_V2.EPD()
+    try:
         epd.init()
         epd.Clear()
         epd.display(epd.getbuffer(img_1bit))
-        epd.sleep()
-    except ImportError:
-        print("waveshare_epd not found — run on a Pi with the driver installed.")
     except Exception as e:
         print(f"Display error: {e}")
+    finally:
+        try:
+            epd.sleep()
+        except Exception:
+            pass
 
 
-def run_hardware_loop():
-    """Main loop for Pi: fetch data, render, push to display, handle button."""
+def run_hardware_loop(neo_objs, d_start, d_end, sentry_items):
+    """Main loop for Pi: render, push to display, handle button.
+
+    Data is fetched once by main() and passed in — the loop refetches only on
+    its hourly schedule, so a startup costs one call per API, not two.
+    """
     try:
         import RPi.GPIO as GPIO
     except ImportError:
@@ -544,7 +578,6 @@ def run_hardware_loop():
     BUTTON_PIN = 26
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
 
     img_neo = to_1bit(render_neo_watch(neo_objs, d_start, d_end))
     img_sentry = to_1bit(render_sentry(sentry_items))
@@ -584,6 +617,12 @@ def run_hardware_loop():
     except KeyboardInterrupt:
         print("\nShutting down...")
     finally:
+        # Belt and braces: make sure the panel is parked asleep on the way out.
+        try:
+            from waveshare_epd import epd7in5_V2
+            epd7in5_V2.EPD().sleep()
+        except Exception:
+            pass
         GPIO.cleanup()
 
 
@@ -610,11 +649,11 @@ def main():
         sentry_items = fetch_sentry()
         print(f"  {len(sentry_items) if sentry_items else 0} risk-list objects")
 
-    # Render grayscale
-    img_neo = render_neo_watch(neo_objs, d_start, d_end)
-    img_sentry = render_sentry(sentry_items)
-
     if args.preview:
+        # Render grayscale
+        img_neo = render_neo_watch(neo_objs, d_start, d_end)
+        img_sentry = render_sentry(sentry_items)
+
         # Save both grayscale (easier to review) and 1-bit (actual display)
         out = Path(".")
         img_neo.save(out / "neo_watch_gray.png")
@@ -646,13 +685,12 @@ def _render_combo(img1, img2):
         bx = pad + i * (single_w + pad)
         by = pad
         # Green bezel
-        for y in range(single_h):
-            for x in range(single_w):
-                combo.putpixel((bx + x, by + y), (157, 171, 147))
+        combo.paste(Image.new("RGB", (single_w, single_h), (157, 171, 147)), (bx, by))
         # Inner dark border
-        for y in range(bezel - 6, single_h - bezel + 6):
-            for x in range(bezel - 6, single_w - bezel + 6):
-                combo.putpixel((bx + x, by + y), (42, 42, 40))
+        inner_w = single_w - 2 * (bezel - 6)
+        inner_h = single_h - 2 * (bezel - 6)
+        combo.paste(Image.new("RGB", (inner_w, inner_h), (42, 42, 40)),
+                    (bx + bezel - 6, by + bezel - 6))
         # Screen content
         screen = img.convert("RGB")
         combo.paste(screen, (bx + bezel, by + bezel))
